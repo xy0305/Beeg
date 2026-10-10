@@ -59,7 +59,7 @@ enum BeegCatalog {
                 if lhs.height == rhs.height { return lhs.bandwidth > rhs.bandwidth }
                 return lhs.height > rhs.height
             }
-            .map { ($0.height > 0 ? "\($0.height)p" : "\($0.bandwidth)", $0.path) }
+            .map { (label: $0.height > 0 ? "\($0.height)p" : "\($0.bandwidth)", path: $0.path) }
             .reduce(into: [(label: String, path: String)]()) { result, item in
                 guard !result.contains(where: { $0.label == item.label }) else { return }
                 result.append(item)
