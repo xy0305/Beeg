@@ -43,17 +43,27 @@ enum BeegCatalog {
         return URL(string: "https://video.beeg.com/\(encoded)")
     }
 
-    static func preferredVariant(_ playlist: String) -> String? {
+    static func variants(_ playlist: String) -> [(label: String, path: String)] {
         let rows = playlist.components(separatedBy: .newlines)
-        var variants: [(bandwidth: Int, path: String)] = []
+        var found: [(height: Int, bandwidth: Int, path: String)] = []
         for index in rows.indices where rows[index].contains("#EXT-X-STREAM-INF") {
             guard index + 1 < rows.count else { continue }
             let path = rows[index + 1].trimmingCharacters(in: .whitespaces)
-            guard path.hasPrefix("/"), !path.contains("://") else { continue }
+            guard path.hasPrefix("/"), !path.contains("://"), !path.contains("..") else { continue }
             let bandwidth = capture(#"BANDWIDTH=(\d+)"#, in: rows[index]).flatMap(Int.init) ?? 0
-            variants.append((bandwidth, path))
+            let height = capture(#"RESOLUTION=\d+x(\d+)"#, in: rows[index]).flatMap(Int.init) ?? 0
+            found.append((height, bandwidth, path))
         }
-        return variants.max { $0.bandwidth < $1.bandwidth }?.path
+        return found
+            .sorted { lhs, rhs in
+                if lhs.height == rhs.height { return lhs.bandwidth > rhs.bandwidth }
+                return lhs.height > rhs.height
+            }
+            .map { ($0.height > 0 ? "\($0.height)p" : "\($0.bandwidth)", $0.path) }
+    }
+
+    static func preferredVariant(_ playlist: String) -> String? {
+        variants(playlist).first?.path
     }
 
     private static func trim(_ value: Double) -> String {

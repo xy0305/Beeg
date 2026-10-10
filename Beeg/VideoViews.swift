@@ -1,5 +1,12 @@
 import SwiftUI
 
+struct PlayerWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct VideoCard: View {
     let video: BeegVideo
     @State private var frame = 0
@@ -96,7 +103,7 @@ struct VideoCard: View {
 
 struct VideoDetailView: View {
     let video: BeegVideo
-    @State private var playbackURL: URL?
+    @State private var playback: BeegPlayback?
     @State private var error: String?
     @State private var loading = true
 
@@ -109,23 +116,15 @@ struct VideoDetailView: View {
                     .padding(.horizontal, 10)
                 VStack(alignment: .leading, spacing: 8) {
                     Text(video.title)
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(.system(size: 22, weight: .bold))
                     HStack(spacing: 8) {
                         Text(BeegCatalog.compactCount(video.views))
                         Text("·")
                         Text("\(BeegCatalog.compactCount(video.likes)) Likes")
                     }
                     .foregroundStyle(BeegTheme.muted)
-                    HStack(spacing: 12) {
-                        CircleAvatar(url: video.ownerAvatar, size: 56)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(video.ownerName.isEmpty ? "beeg" : video.ownerName)
-                                .font(.system(size: 18, weight: .bold))
-                            Text(BeegCatalog.duration(video.duration))
-                                .foregroundStyle(BeegTheme.muted)
-                        }
-                    }
-                    .padding(.top, 8)
+                    authorLink
+                        .padding(.top, 10)
                 }
                 .padding(.horizontal, 16)
                 .foregroundStyle(.white)
@@ -140,9 +139,45 @@ struct VideoDetailView: View {
     }
 
     @ViewBuilder
+    private var authorLink: some View {
+        if video.ownerSlug.isEmpty {
+            authorRow
+        } else {
+            NavigationLink(value: ownerTag) {
+                authorRow
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("打开 \(video.ownerName)")
+        }
+    }
+
+    private var authorRow: some View {
+        HStack(spacing: 12) {
+            CircleAvatar(url: video.ownerAvatar, size: 56)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(video.ownerName.isEmpty ? "beeg" : video.ownerName)
+                    .font(.system(size: 18, weight: .bold))
+                Text(BeegCatalog.duration(video.duration))
+                    .foregroundStyle(BeegTheme.muted)
+            }
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        .foregroundStyle(.white)
+    }
+
+    private var ownerTag: BeegTag {
+        BeegTag(id: ownerID, name: video.ownerName, slug: video.ownerSlug, kind: "owner", avatar: video.ownerAvatar)
+    }
+
+    private var ownerID: Int {
+        video.ownerSlug.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0x7fffffff }
+    }
+
+    @ViewBuilder
     private var player: some View {
-        if let playbackURL {
-            BeegPlayer(url: playbackURL)
+        if let playback {
+            BeegPlayer(qualities: playback.qualities)
         } else if loading {
             ZStack {
                 RemoteImage(url: BeegClient.frameURL(fileID: video.id, second: video.thumbs.first ?? 0, width: 1280))
@@ -156,7 +191,7 @@ struct VideoDetailView: View {
 
     private func load() async {
         do {
-            playbackURL = try await BeegClient().playbackURL(fileID: video.id)
+            playback = try await BeegClient().playback(fileID: video.id)
         } catch {
             self.error = error.localizedDescription
         }

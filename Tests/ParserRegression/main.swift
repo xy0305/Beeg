@@ -36,6 +36,7 @@ let playlist = """
 /key=b/1080p/1.mp4.m3u8
 """
 expect(BeegCatalog.preferredVariant(playlist) == "/key=b/1080p/1.mp4.m3u8", "highest variant")
+expect(BeegCatalog.variants(playlist).map(\.label) == ["1080p", "240p"], "quality labels")
 expect(BeegCatalog.preferredVariant("#EXTM3U\nhttps://evil.example/x.m3u8") == nil, "reject remote variant")
 
 print("beeg catalog regression passed")

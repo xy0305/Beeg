@@ -31,6 +31,16 @@ struct BeegTag: Identifiable, Hashable {
     var displayName: String { BeegCatalog.displayName(name) }
 }
 
+struct BeegQuality: Identifiable, Hashable {
+    let id: String
+    let label: String
+    let url: URL
+}
+
+struct BeegPlayback {
+    let qualities: [BeegQuality]
+}
+
 enum BeegAPIError: LocalizedError {
     case invalidResponse
     case rejected(String)
@@ -99,7 +109,7 @@ final class BeegClient {
         return rows.compactMap(BeegTag.init)
     }
 
-    func playbackURL(fileID: Int) async throws -> URL {
+    func playback(fileID: Int) async throws -> BeegPlayback {
         var request = URLRequest(url: endpoint("/video/play_url/\(fileID)"))
         request.setValue("*/*", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: request)
@@ -114,11 +124,17 @@ final class BeegClient {
         playlistRequest.setValue("https://beeg.com", forHTTPHeaderField: "Origin")
         let (playlistData, playlistResponse) = try await session.data(for: playlistRequest)
         try validate(playlistResponse)
-        guard let playlist = String(data: playlistData, encoding: .utf8),
-              let variant = BeegCatalog.preferredVariant(playlist) else {
-            return master
+        guard let playlist = String(data: playlistData, encoding: .utf8) else {
+            throw BeegAPIError.invalidResponse
         }
-        return URL(string: "https://video.beeg.com\(variant)") ?? master
+        let qualities = BeegCatalog.variants(playlist).compactMap { item -> BeegQuality? in
+            guard let url = URL(string: "https://video.beeg.com\(item.path)") else { return nil }
+            return BeegQuality(id: item.label, label: item.label, url: url)
+        }
+        if qualities.isEmpty {
+            return BeegPlayback(qualities: [BeegQuality(id: "auto", label: "Auto", url: master)])
+        }
+        return BeegPlayback(qualities: qualities)
     }
 
     static func avatarURL(photoID: Int?, cropID: Int?) -> URL? {
