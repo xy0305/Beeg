@@ -347,6 +347,7 @@ struct TagFeedView: View {
 struct SearchView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
+    @State private var lastQuery = ""
     @State private var tags: [BeegTag] = []
     @State private var loading = false
     @State private var error: String?
@@ -379,6 +380,9 @@ struct SearchView: View {
             .navigationDestination(for: BeegTag.self) { TagFeedView(tag: $0) }
             .searchable(text: $query, prompt: "搜索")
             .onSubmit(of: .search) { Task { await search() } }
+            .onChange(of: query) { _, _ in
+                Task { await search() }
+            }
             .overlay { if loading { ProgressView().tint(.white) } }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -393,7 +397,15 @@ struct SearchView: View {
 
     private func search() async {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard trimmed != lastQuery else { return }
+        lastQuery = trimmed
+        guard !trimmed.isEmpty else {
+            tags = []
+            error = nil
+            return
+        }
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        guard trimmed == query.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
         loading = true
         defer { loading = false }
         do {

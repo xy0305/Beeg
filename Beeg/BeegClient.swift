@@ -624,7 +624,6 @@ private final class SearchSocket: NSObject, URLSessionWebSocketDelegate {
                 @unknown default: text = "[]"
                 }
                 finish(.success(text))
-                task.cancel(with: .normalClosure, reason: nil)
             } catch {
                 finish(.failure(error))
             }
