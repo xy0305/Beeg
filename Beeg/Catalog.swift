@@ -68,8 +68,8 @@ enum BeegCatalog {
 
     static func isCancellation(_ error: Error) -> Bool {
         if error is CancellationError { return true }
-        let text = error.localizedDescription.lowercased()
-        return text == "cancelled" || text == "canceled"
+        let urlError = error as? URLError
+        return urlError?.code == .cancelled
     }
 
     static func preferredVariant(_ playlist: String) -> String? {
