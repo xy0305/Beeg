@@ -25,20 +25,11 @@ struct BeegPlayer: View {
                     stage(fullscreen: true)
                 }
                 .ignoresSafeArea()
+                .onAppear { OrientationLock.set(.landscapeRight) }
+                .onDisappear { OrientationLock.set(.portrait) }
             }
             .onAppear { activateAudio() }
-            .onDisappear {
-                coordinator.playerLayer?.pause()
-                OrientationLock.set(.portrait)
-            }
-            .confirmationDialog("画质", isPresented: $showQualities, titleVisibility: .visible) {
-                ForEach(qualities) { quality in
-                    Button(quality.id == selectedID ? "\(quality.label) ✓" : quality.label) {
-                        switchQuality(quality)
-                    }
-                }
-                Button("取消", role: .cancel) {}
-            }
+            .onDisappear { coordinator.playerLayer?.pause() }
     }
 
     private func stage(fullscreen: Bool) -> some View {
@@ -47,10 +38,13 @@ struct BeegPlayer: View {
             if let quality = selected {
                 KSVideoPlayer(coordinator: coordinator, url: quality.url, options: playbackOptions)
             }
-                controls(fullscreen: fullscreen)
-                if fullscreen {
-                    progressBar
-                }
+            controls(fullscreen: fullscreen)
+            if fullscreen {
+                progressBar
+            }
+            if showQualities {
+                qualityPanel
+            }
         }
         .background(Color.black)
     }
@@ -60,12 +54,13 @@ struct BeegPlayer: View {
             HStack(spacing: 4) {
                 if fullscreen {
                     controlButton("chevron.left", label: "退出横屏") {
+                        showQualities = false
                         self.fullscreen = false
                     }
                 }
                 Spacer()
                 Button {
-                    showQualities = true
+                    showQualities.toggle()
                 } label: {
                     Text(selected?.label ?? "画质")
                         .font(.system(size: 14, weight: .semibold))
@@ -78,6 +73,7 @@ struct BeegPlayer: View {
                     fullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                     label: fullscreen ? "退出横屏" : "横屏播放"
                 ) {
+                    showQualities = false
                     self.fullscreen.toggle()
                 }
             }
@@ -117,11 +113,36 @@ struct BeegPlayer: View {
         }
         .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
             guard fullscreen, !seeking else { return }
-            let time = coordinator.playerLayer?.player.currentPlaybackTime ?? 0
+            currentTime = coordinator.playerLayer?.player.currentPlaybackTime ?? currentTime
             let total = coordinator.playerLayer?.player.duration ?? 0
-            currentTime = time
             if total > 0 { duration = total }
         }
+    }
+
+    private var qualityPanel: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.opacity(0.01)
+                .contentShape(Rectangle())
+                .onTapGesture { showQualities = false }
+            VStack(alignment: .trailing, spacing: 8) {
+                ForEach(qualities) { quality in
+                    Button {
+                        switchQuality(quality)
+                        showQualities = false
+                    } label: {
+                        Text(quality.id == selectedID ? "\(quality.label) ✓" : quality.label)
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(minWidth: 92)
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 12)
+                            .background(.black.opacity(0.78), in: Capsule())
+                    }
+                }
+            }
+            .padding(.top, 62)
+            .padding(.trailing, 58)
+        }
+        .foregroundStyle(.white)
     }
 
     private func controlButton(_ system: String, label: String, action: @escaping () -> Void) -> some View {
@@ -152,10 +173,12 @@ struct BeegPlayer: View {
     }
 
     private func switchQuality(_ quality: BeegQuality) {
-        let time = coordinator.playerLayer?.player.currentPlaybackTime ?? 0
+        let time = coordinator.playerLayer?.player.currentPlaybackTime ?? currentTime
         selectedID = quality.id
         coordinator.playerLayer?.set(url: quality.url, options: playbackOptions)
-        if time > 1 {
+        guard time > 1 else { return }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
             coordinator.playerLayer?.seek(time: time, autoPlay: true, completion: { _ in })
         }
     }
@@ -192,11 +215,6 @@ private final class LandscapeController<Content: View>: UIHostingController<Cont
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         OrientationLock.set(.landscapeRight)
-    }
-
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        OrientationLock.set(.portrait)
     }
 }
 
