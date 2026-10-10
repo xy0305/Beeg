@@ -5,6 +5,7 @@ import KSPlayer
 struct BeegPlayer: View {
     let qualities: [BeegQuality]
     @State private var selectedID: String
+    @State private var fullscreen = false
     @State private var showQualities = false
     @StateObject private var coordinator = KSVideoPlayer.Coordinator()
 
@@ -14,43 +15,45 @@ struct BeegPlayer: View {
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            let landscape = proxy.size.width > proxy.size.height
-            ZStack {
-                Color.black
-                if let quality = selected {
-                    KSVideoPlayer(coordinator: coordinator, url: quality.url, options: playbackOptions)
+        stage(fullscreen: false)
+            .fullScreenCover(isPresented: $fullscreen) {
+                LandscapeHost {
+                    stage(fullscreen: true)
                 }
-                controls(landscape: landscape)
+                .ignoresSafeArea()
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .ignoresSafeArea(landscape ? .all : [])
-        }
-        .onAppear { activateAudio() }
-        .onDisappear {
-            coordinator.playerLayer?.pause()
-            OrientationLock.set(.portrait)
-        }
-        .confirmationDialog("画质", isPresented: $showQualities, titleVisibility: .visible) {
-            ForEach(qualities) { quality in
-                Button(quality.id == selectedID ? "\(quality.label) ✓" : quality.label) {
-                    switchQuality(quality)
+            .onAppear { activateAudio() }
+            .onDisappear {
+                coordinator.playerLayer?.pause()
+                OrientationLock.set(.portrait)
+            }
+            .confirmationDialog("画质", isPresented: $showQualities, titleVisibility: .visible) {
+                ForEach(qualities) { quality in
+                    Button(quality.id == selectedID ? "\(quality.label) ✓" : quality.label) {
+                        switchQuality(quality)
+                    }
                 }
+                Button("取消", role: .cancel) {}
             }
-            Button("取消", role: .cancel) {}
-        }
     }
 
-    private func controls(landscape: Bool) -> some View {
+    private func stage(fullscreen: Bool) -> some View {
+        ZStack {
+            Color.black
+            if let quality = selected {
+                KSVideoPlayer(coordinator: coordinator, url: quality.url, options: playbackOptions)
+            }
+            controls(fullscreen: fullscreen)
+        }
+        .background(Color.black)
+    }
+
+    private func controls(fullscreen: Bool) -> some View {
         VStack {
-            HStack {
-                if landscape {
-                    Button {
-                        OrientationLock.set(.portrait)
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 18, weight: .semibold))
-                            .frame(width: 40, height: 40)
+            HStack(spacing: 4) {
+                if fullscreen {
+                    controlButton("chevron.left", label: "退出横屏") {
+                        self.fullscreen = false
                     }
                 }
                 Spacer()
@@ -60,22 +63,33 @@ struct BeegPlayer: View {
                     Text(selected?.label ?? "画质")
                         .font(.system(size: 14, weight: .semibold))
                         .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(.black.opacity(0.45), in: Capsule())
+                        .padding(.vertical, 8)
+                        .background(.black.opacity(0.55), in: Capsule())
                 }
-                Button {
-                    OrientationLock.set(landscape ? .portrait : .landscapeRight)
-                } label: {
-                    Image(systemName: landscape ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(width: 40, height: 40)
+                .accessibilityLabel("切换画质")
+                controlButton(
+                    fullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                    label: fullscreen ? "退出横屏" : "横屏播放"
+                ) {
+                    self.fullscreen.toggle()
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.top, landscape ? 8 : 4)
+            .padding(.horizontal, 10)
+            .padding(.top, fullscreen ? 16 : 6)
             Spacer()
         }
         .foregroundStyle(.white)
+    }
+
+    private func controlButton(_ system: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: system)
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 44, height: 44)
+                .background(.black.opacity(0.35), in: Circle())
+                .contentShape(Circle())
+        }
+        .accessibilityLabel(label)
     }
 
     private var selected: BeegQuality? {
@@ -109,12 +123,46 @@ struct BeegPlayer: View {
     }
 }
 
+private struct LandscapeHost<Content: View>: UIViewControllerRepresentable {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    func makeUIViewController(context: Context) -> LandscapeController<Content> {
+        LandscapeController(rootView: content)
+    }
+
+    func updateUIViewController(_ controller: LandscapeController<Content>, context: Context) {
+        controller.rootView = content
+    }
+}
+
+private final class LandscapeController<Content: View>: UIHostingController<Content> {
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { .landscapeRight }
+    override var shouldAutorotate: Bool { true }
+    override var prefersStatusBarHidden: Bool { true }
+    override var prefersHomeIndicatorAutoHidden: Bool { true }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        OrientationLock.set(.landscapeRight)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        OrientationLock.set(.portrait)
+    }
+}
+
 enum OrientationLock {
     static func set(_ mask: UIInterfaceOrientationMask) {
         let resolved: UIInterfaceOrientationMask = UIDevice.current.userInterfaceIdiom == .pad && mask == .portrait ? .all : mask
         KSOptions.supportedInterfaceOrientations = resolved
-        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
-        scene.windows.first(where: \.isKeyWindow)?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
-        scene.requestGeometryUpdate(UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: resolved)) { _ in }
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        scene?.requestGeometryUpdate(UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: resolved)) { _ in }
+        scene?.windows.forEach { $0.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations() }
     }
 }
