@@ -169,17 +169,35 @@ final class HomeModel: ObservableObject {
     }
 
     func reload() async {
+        let previous = (videos, people, studios, topics, offset, hasMore)
         offset = 0
         hasMore = true
-        videos = []
         error = nil
-        async let people = client.recommends(type: "person")
-        async let studios = client.recommends(type: "brand")
-        async let topics = client.recommends(type: "other")
-        self.people = (try? await people) ?? []
-        self.studios = (try? await studios) ?? []
-        self.topics = (try? await topics) ?? []
-        await loadMore()
+        async let peopleRequest = client.recommends(type: "person")
+        async let studiosRequest = client.recommends(type: "brand")
+        async let topicsRequest = client.recommends(type: "other")
+        let refreshedPeople = (try? await peopleRequest) ?? previous.1
+        let refreshedStudios = (try? await studiosRequest) ?? previous.2
+        let refreshedTopics = (try? await topicsRequest) ?? previous.3
+        do {
+            let page = try await client.home(offset: 0)
+            videos = page
+            people = refreshedPeople
+            studios = refreshedStudios
+            topics = refreshedTopics
+            offset = page.count
+            hasMore = page.count >= BeegCatalog.minimumPageSize
+            error = nil
+        } catch {
+            videos = previous.0
+            people = previous.1
+            studios = previous.2
+            topics = previous.3
+            offset = previous.4
+            hasMore = previous.5
+            guard !BeegCatalog.isCancellation(error) else { return }
+            self.error = error.localizedDescription
+        }
     }
 
     func loadMoreIfNeeded(_ video: BeegVideo) async {
@@ -199,6 +217,7 @@ final class HomeModel: ObservableObject {
             hasMore = page.count >= BeegCatalog.minimumPageSize
             error = nil
         } catch {
+            guard !BeegCatalog.isCancellation(error) else { return }
             self.error = error.localizedDescription
             hasMore = false
         }

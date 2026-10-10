@@ -145,47 +145,45 @@ final class BeegClient {
     }
 
     func login(email: String, password: String) async throws -> BeegAccount {
+        let account = try await authenticate(path: "login", email: email, password: password)
+        return account
+    }
+
+    func signup(email: String, password: String) async throws {
+        _ = try await authenticate(path: "signup", email: email, password: password)
+    }
+
+    private func authenticate(path: String, email: String, password: String) async throws -> BeegAccount {
+        guard ["login", "signup"].contains(path) else { throw BeegAPIError.rejected("无效登录请求") }
         let email = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard email.contains("@"), email.count <= 120, (8...128).contains(password.count) else {
+        guard email.contains("@"), email.contains("."), email.count <= 120,
+              !email.contains(" "), (8...128).contains(password.count) else {
             throw BeegAPIError.rejected("请输入有效邮箱和至少 8 位密码")
+        }
+        guard let url = URL(string: "https://auth.beeg.com/\(path)/"), url.host == "auth.beeg.com" else {
+            throw BeegAPIError.invalidResponse
         }
         let body = try JSONSerialization.data(withJSONObject: [
             "email": email,
             "password": password,
             "scope": "beeg"
         ])
-        var request = URLRequest(url: URL(string: "https://auth.beeg.com/login/")!)
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("https://beeg.com/", forHTTPHeaderField: "Referer")
+        request.setValue("https://beeg.com", forHTTPHeaderField: "Origin")
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw BeegAPIError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw BeegAPIError.rejected(Self.message(from: data) ?? "登录失败")
+        }
+        if path == "signup", data.isEmpty {
+            return BeegAccount(email: email, token: "")
         }
         let token = (try? decoder.decode(LoginResponse.self, from: data).token) ?? ""
         guard !token.isEmpty else { throw BeegAPIError.rejected("登录失败") }
         return BeegAccount(email: email, token: token)
-    }
-
-    func signup(email: String, password: String) async throws {
-        let email = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard email.contains("@"), (8...128).contains(password.count) else {
-            throw BeegAPIError.rejected("请输入有效邮箱和至少 8 位密码")
-        }
-        let body = try JSONSerialization.data(withJSONObject: [
-            "email": email,
-            "password": password,
-            "scope": "beeg"
-        ])
-        var request = URLRequest(url: URL(string: "https://auth.beeg.com/signup/")!)
-        request.httpMethod = "POST"
-        request.httpBody = body
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw BeegAPIError.rejected(Self.message(from: data) ?? "注册失败")
-        }
     }
 
     func logout() async {

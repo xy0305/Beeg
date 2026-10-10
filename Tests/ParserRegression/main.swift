@@ -37,6 +37,11 @@ let playlist = """
 """
 expect(BeegCatalog.preferredVariant(playlist) == "/key=b/1080p/1.mp4.m3u8", "highest variant")
 expect(BeegCatalog.variants(playlist).map(\.label) == ["1080p", "240p"], "quality labels")
+let duplicated = playlist + "\n#EXT-X-STREAM-INF:BANDWIDTH=800,RESOLUTION=1280x720\n/key=c/720a.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=700,RESOLUTION=1280x720\n/key=d/720b.m3u8\n"
+expect(BeegCatalog.variants(duplicated).map(\.label) == ["1080p", "720p", "240p"], "dedupe qualities")
 expect(BeegCatalog.preferredVariant("#EXTM3U\nhttps://evil.example/x.m3u8") == nil, "reject remote variant")
+expect(BeegCatalog.isCancellation(CancellationError()), "cancellation error")
+expect(BeegCatalog.isCancellation(URLError(.cancelled)), "url cancellation")
+expect(!BeegCatalog.isCancellation(URLError(.timedOut)), "timeout is visible")
 
 print("beeg catalog regression passed")

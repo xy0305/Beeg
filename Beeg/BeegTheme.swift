@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 
 enum BeegTheme {
     static let background = Color(red: 0.008, green: 0.016, blue: 0.031)
@@ -27,14 +28,49 @@ struct RemoteImage: View {
         Color.white.opacity(0.06)
             .overlay {
                 if let url {
-                    AsyncImage(url: url) { phase in
-                        if let image = phase.image {
-                            image.resizable().aspectRatio(contentMode: contentMode)
+                    if url.pathExtension.lowercased() == "svg" {
+                        SVGImage(url: url)
+                    } else {
+                        AsyncImage(url: url) { phase in
+                            if let image = phase.image {
+                                image.resizable().aspectRatio(contentMode: contentMode)
+                            }
                         }
                     }
                 }
             }
             .clipped()
+    }
+}
+
+private struct SVGImage: UIViewRepresentable {
+    let url: URL
+
+    func makeUIView(context: Context) -> WKWebView {
+        let web = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        web.isOpaque = false
+        web.backgroundColor = .clear
+        web.scrollView.backgroundColor = .clear
+        web.scrollView.isScrollEnabled = false
+        web.isUserInteractionEnabled = false
+        return web
+    }
+
+    func updateUIView(_ web: WKWebView, context: Context) {
+        guard context.coordinator.loaded != url else { return }
+        context.coordinator.loaded = url
+        let page = """
+        <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+        <style>html,body{margin:0;background:transparent;width:100%;height:100%}img{width:100%;height:100%;object-fit:cover}</style>
+        </head><body><img src="\(url.absoluteString)"></body></html>
+        """
+        web.loadHTMLString(page, baseURL: URL(string: "https://beeg.com/"))
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var loaded: URL?
     }
 }
 
