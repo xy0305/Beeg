@@ -174,10 +174,16 @@ final class BeegClient {
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw BeegAPIError.rejected(Self.message(from: data) ?? "登录失败")
         }
-        let token = (try? decoder.decode(LoginResponse.self, from: data).token) ?? ""
-        guard !token.isEmpty else {
-            throw BeegAPIError.rejected(Self.message(from: data) ?? "登录未完成，请完成验证后重试")
+        var token = (try? decoder.decode(LoginResponse.self, from: data).token) ?? ""
+        if token.isEmpty, path == "login" {
+            let (accountData, accountResponse) = try await authRequest(path: "account", method: "GET")
+            guard let accountHTTP = accountResponse as? HTTPURLResponse,
+                  (200..<300).contains(accountHTTP.statusCode) else {
+                throw BeegAPIError.rejected(Self.message(from: accountData) ?? "登录失败")
+            }
+            token = "session"
         }
+        guard !token.isEmpty else { throw BeegAPIError.rejected("登录失败") }
         return BeegAccount(email: email, token: token)
     }
 
@@ -193,7 +199,7 @@ final class BeegClient {
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         request.setValue("https://beeg.com/", forHTTPHeaderField: "Referer")
         request.setValue("https://beeg.com", forHTTPHeaderField: "Origin")
-        if let token = BeegSession.shared.token, !token.isEmpty {
+        if let token = BeegSession.shared.token, !token.isEmpty, token != "session" {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         return try await session.data(for: request)
@@ -288,8 +294,9 @@ final class BeegClient {
 
     private func authorizedData(for url: URL) async throws -> Data {
         var request = URLRequest(url: url)
-        guard let token = BeegSession.shared.token else { throw BeegAPIError.rejected("请先登录") }
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let token = BeegSession.shared.token, !token.isEmpty, token != "session" {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw BeegAPIError.rejected(httpMessage(response, data))
