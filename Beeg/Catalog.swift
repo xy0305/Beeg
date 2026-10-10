@@ -1,0 +1,75 @@
+import Foundation
+
+enum BeegCatalog {
+    static let pageSize = 12
+    static let minimumPageSize = 10
+
+    static func displayName(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "{", with: "").replacingOccurrences(of: "}", with: "")
+    }
+
+    static func compactCount(_ value: Int) -> String {
+        let number = Double(value)
+        if number >= 1_000_000 {
+            return trim(number / 1_000_000) + "M"
+        }
+        if number >= 1_000 {
+            return trim(number / 1_000) + "K"
+        }
+        return "\(value)"
+    }
+
+    static func duration(_ seconds: Int) -> String {
+        let safe = max(0, seconds)
+        return String(format: "%d:%02d", safe / 60, safe % 60)
+    }
+
+    static func relativeDate(_ iso: String, now: Date = Date()) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = formatter.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+        guard let date else { return "" }
+        let days = Calendar.current.dateComponents([.day], from: date, to: now).day ?? 0
+        if days <= 0 { return "Today" }
+        if days == 1 { return "Yesterday" }
+        if days < 7 { return "\(days)d" }
+        return "\(days / 7)w"
+    }
+
+    static func masterPlaylist(template: String, fileID: Int) -> URL? {
+        let trimmed = template.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.contains(".m3u8"), !trimmed.contains(".."), !trimmed.contains("://") else { return nil }
+        let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .beegPath) ?? trimmed
+        return URL(string: "https://video.beeg.com/\(encoded)")
+    }
+
+    static func preferredVariant(_ playlist: String) -> String? {
+        let rows = playlist.components(separatedBy: .newlines)
+        var variants: [(bandwidth: Int, path: String)] = []
+        for index in rows.indices where rows[index].contains("#EXT-X-STREAM-INF") {
+            guard index + 1 < rows.count else { continue }
+            let path = rows[index + 1].trimmingCharacters(in: .whitespaces)
+            guard path.hasPrefix("/"), !path.contains("://") else { continue }
+            let bandwidth = capture(#"BANDWIDTH=(\d+)"#, in: rows[index]).flatMap(Int.init) ?? 0
+            variants.append((bandwidth, path))
+        }
+        return variants.max { $0.bandwidth < $1.bandwidth }?.path
+    }
+
+    private static func trim(_ value: Double) -> String {
+        let text = String(format: "%.1f", value)
+        return text.hasSuffix(".0") ? String(text.dropLast(2)) : text
+    }
+
+    private static func capture(_ pattern: String, in text: String) -> String? {
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = expression.firstMatch(in: text, range: range), match.numberOfRanges > 1,
+              let found = Range(match.range(at: 1), in: text) else { return nil }
+        return String(text[found])
+    }
+}
+
+private extension CharacterSet {
+    static let beegPath = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/:?=,+")
+}
