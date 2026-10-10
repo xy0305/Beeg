@@ -99,7 +99,7 @@ struct BeegPlayer: View {
         selectedID = quality.id
         coordinator.playerLayer?.set(url: quality.url, options: playbackOptions)
         if time > 1 {
-            coordinator.playerLayer?.seek(time: time, completion: { _ in })
+            coordinator.playerLayer?.seek(time: time, autoPlay: true, completion: { _ in })
         }
     }
 
