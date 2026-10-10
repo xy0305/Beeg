@@ -41,6 +41,30 @@ struct BeegPlayback {
     let qualities: [BeegQuality]
 }
 
+struct BeegLink: Identifiable, Hashable {
+    let id: Int
+    let name: String
+    let url: URL
+    let icon: URL?
+    let featured: Bool
+}
+
+struct BeegProfile: Identifiable, Hashable {
+    let id: Int
+    let name: String
+    let slug: String
+    let followers: Int
+    let videos: Int
+    let caption: String
+    let avatar: URL?
+    let links: [BeegLink]
+}
+
+struct BeegAccount: Codable, Equatable {
+    var email: String
+    var token: String
+}
+
 enum BeegAPIError: LocalizedError {
     case invalidResponse
     case rejected(String)
@@ -109,6 +133,98 @@ final class BeegClient {
         return rows.compactMap(BeegTag.init)
     }
 
+    func profile(slug: String) async throws -> BeegProfile {
+        let safe = slug.filter { $0.isLetter || $0.isNumber }
+        guard !safe.isEmpty else { throw BeegAPIError.rejected("无效作者") }
+        let data = try await data(for: endpoint("/tag", [
+            "slug": safe,
+            "get_original": "true",
+            "with_relations": "true"
+        ]))
+        return try BeegProfile(decoder.decode(RawProfile.self, from: data))
+    }
+
+    func login(email: String, password: String) async throws -> BeegAccount {
+        let email = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard email.contains("@"), email.count <= 120, (8...128).contains(password.count) else {
+            throw BeegAPIError.rejected("请输入有效邮箱和至少 8 位密码")
+        }
+        let body = try JSONSerialization.data(withJSONObject: [
+            "email": email,
+            "password": password,
+            "scope": "beeg"
+        ])
+        var request = URLRequest(url: URL(string: "https://auth.beeg.com/login/")!)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw BeegAPIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw BeegAPIError.rejected(Self.message(from: data) ?? "登录失败")
+        }
+        let token = (try? decoder.decode(LoginResponse.self, from: data).token) ?? ""
+        guard !token.isEmpty else { throw BeegAPIError.rejected("登录失败") }
+        return BeegAccount(email: email, token: token)
+    }
+
+    func signup(email: String, password: String) async throws {
+        let email = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard email.contains("@"), (8...128).contains(password.count) else {
+            throw BeegAPIError.rejected("请输入有效邮箱和至少 8 位密码")
+        }
+        let body = try JSONSerialization.data(withJSONObject: [
+            "email": email,
+            "password": password,
+            "scope": "beeg"
+        ])
+        var request = URLRequest(url: URL(string: "https://auth.beeg.com/signup/")!)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw BeegAPIError.rejected(Self.message(from: data) ?? "注册失败")
+        }
+    }
+
+    func logout() async {
+        guard let token = BeegSession.shared.token else { return }
+        var request = URLRequest(url: URL(string: "https://auth.beeg.com/logout/")!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        _ = try? await session.data(for: request)
+    }
+
+    func isFollowing(tagID: Int) async throws -> Bool {
+        let data = try await authorizedData(for: endpoint("/follow", ["limit": "100", "offset": "0"]))
+        let rows = try decoder.decode([FollowRow].self, from: data)
+        return rows.contains { $0.fwTag == tagID || $0.tag?.id == tagID }
+    }
+
+    func setFollowing(_ following: Bool, tagID: Int) async throws {
+        guard tagID > 0 else { throw BeegAPIError.rejected("无法关注") }
+        let body = try JSONSerialization.data(withJSONObject: ["fw_tag": tagID])
+        var request = URLRequest(url: endpoint("/follow"))
+        request.httpMethod = following ? "POST" : "DELETE"
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token = BeegSession.shared.token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw BeegAPIError.rejected(httpMessage(response, data))
+        }
+    }
+
+    func followedVideos(offset: Int) async throws -> [BeegVideo] {
+        try await videos(url: endpoint("/facts/follow", [
+            "limit": "\(BeegCatalog.pageSize)",
+            "offset": "\(offset)"
+        ]), authorized: true)
+    }
+
     func playback(fileID: Int) async throws -> BeegPlayback {
         var request = URLRequest(url: endpoint("/video/play_url/\(fileID)"))
         request.setValue("*/*", forHTTPHeaderField: "Accept")
@@ -147,8 +263,9 @@ final class BeegClient {
         return URL(string: "\(thumbs.absoluteString)/videos/\(fileID)/\(max(0, second)).webp?size=\(width)x\(height)")!
     }
 
-    private func videos(url: URL) async throws -> [BeegVideo] {
-        let rows = try decoder.decode([RawFact].self, from: try await data(for: url))
+    private func videos(url: URL, authorized: Bool = false) async throws -> [BeegVideo] {
+        let payload = authorized ? try await authorizedData(for: url) : try await data(for: url)
+        let rows = try decoder.decode([RawFact].self, from: payload)
         return rows.compactMap(BeegVideo.init)
     }
 
@@ -156,6 +273,27 @@ final class BeegClient {
         let (data, response) = try await session.data(from: url)
         try validate(response)
         return data
+    }
+
+    private func authorizedData(for url: URL) async throws -> Data {
+        var request = URLRequest(url: url)
+        guard let token = BeegSession.shared.token else { throw BeegAPIError.rejected("请先登录") }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw BeegAPIError.rejected(httpMessage(response, data))
+        }
+        return data
+    }
+
+    private func httpMessage(_ response: URLResponse, _ data: Data) -> String {
+        if let http = response as? HTTPURLResponse, http.statusCode == 401 { return "请先登录" }
+        return Self.message(from: data) ?? "请求失败"
+    }
+
+    private static func message(from data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return object["message"] as? String
     }
 
     private func validate(_ response: URLResponse) throws {
@@ -173,6 +311,111 @@ final class BeegClient {
             components.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
         }
         return components.url!
+    }
+}
+
+private struct LoginResponse: Decodable {
+    let token: String
+}
+
+private struct FollowRow: Decodable {
+    let fwTag: Int?
+    let tag: FollowTag?
+
+    enum CodingKeys: String, CodingKey {
+        case fwTag = "fw_tag"
+        case tag
+    }
+}
+
+private struct FollowTag: Decodable {
+    let id: Int
+}
+
+private struct RawProfile: Decodable {
+    let id: Int
+    let name: String
+    let slug: String
+    let followers: Int?
+    let videos: Int?
+    let data: [RawProfileField]?
+    let links: [RawLink]?
+    let thumbs: [RawThumb]?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name = "tg_name"
+        case slug = "tg_slug"
+        case followers = "tg_followers"
+        case videos = "tg_videos_count"
+        case data, links, thumbs
+    }
+}
+
+private struct RawProfileField: Decodable {
+    let column: String?
+    let value: String?
+
+    enum CodingKeys: String, CodingKey {
+        case column = "td_column"
+        case value = "td_value"
+    }
+}
+
+private struct RawLink: Decodable {
+    let id: Int
+    let url: String?
+    let text: String?
+    let type: RawLinkType?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case url = "lk_url"
+        case text = "_blue_text"
+        case type
+    }
+}
+
+private struct RawLinkType: Decodable {
+    let id: Int
+    let name: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name = "lt_name"
+    }
+}
+
+private extension BeegProfile {
+    init(_ raw: RawProfile) throws {
+        guard raw.id > 0, !raw.slug.isEmpty else { throw BeegAPIError.invalidResponse }
+        let crop = raw.thumbs?.first?.crops?.first
+        id = raw.id
+        name = raw.name
+        slug = raw.slug
+        followers = raw.followers ?? 0
+        videos = raw.videos ?? 0
+        caption = raw.data?.first { $0.column == "tg_caption" }?.value ?? ""
+        avatar = BeegClient.avatarURL(photoID: raw.thumbs?.first?.id, cropID: crop?.id)
+        links = (raw.links ?? []).compactMap(BeegLink.init)
+    }
+}
+
+private extension BeegLink {
+    init?(_ raw: RawLink) {
+        guard let rawURL = raw.url?.trimmingCharacters(in: .whitespacesAndNewlines),
+              rawURL.count <= 300,
+              !rawURL.contains(" "),
+              !rawURL.contains("@"),
+              !rawURL.lowercased().hasPrefix("javascript:") else { return nil }
+        let absolute = rawURL.contains("://") ? rawURL : "https://\(rawURL)"
+        guard let url = URL(string: absolute),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              url.host != nil else { return nil }
+        let name = raw.text?.isEmpty == false ? raw.text! : (raw.type?.name ?? url.host ?? "Link")
+        let icon = raw.type.flatMap { URL(string: "https://cdn27292347.ahacdn.me/tag_full/\($0.id).svg") }
+        self.init(id: raw.id, name: name, url: url, icon: icon, featured: raw.text?.isEmpty == false)
     }
 }
 

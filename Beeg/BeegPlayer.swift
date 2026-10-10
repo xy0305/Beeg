@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import AVFoundation
 import KSPlayer
 
@@ -7,6 +8,9 @@ struct BeegPlayer: View {
     @State private var selectedID: String
     @State private var fullscreen = false
     @State private var showQualities = false
+    @State private var currentTime: Double = 0
+    @State private var duration: Double = 0
+    @State private var seeking = false
     @StateObject private var coordinator = KSVideoPlayer.Coordinator()
 
     init(qualities: [BeegQuality]) {
@@ -43,7 +47,10 @@ struct BeegPlayer: View {
             if let quality = selected {
                 KSVideoPlayer(coordinator: coordinator, url: quality.url, options: playbackOptions)
             }
-            controls(fullscreen: fullscreen)
+                controls(fullscreen: fullscreen)
+                if fullscreen {
+                    progressBar
+                }
         }
         .background(Color.black)
     }
@@ -79,6 +86,42 @@ struct BeegPlayer: View {
             Spacer()
         }
         .foregroundStyle(.white)
+    }
+
+    private var progressBar: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 10) {
+                Text(BeegCatalog.duration(Int(currentTime)))
+                Slider(
+                    value: Binding(
+                        get: { currentTime },
+                        set: { currentTime = $0 }
+                    ),
+                    in: 0...max(duration, 1),
+                    onEditingChanged: { editing in
+                        seeking = editing
+                        if !editing {
+                            coordinator.playerLayer?.seek(time: currentTime, autoPlay: true, completion: { _ in })
+                        }
+                    }
+                )
+                .tint(.white)
+                Text(BeegCatalog.duration(Int(duration)))
+            }
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+            .background(.black.opacity(0.35))
+        }
+        .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
+            guard fullscreen, !seeking else { return }
+            let time = coordinator.playerLayer?.player.currentPlaybackTime ?? 0
+            let total = coordinator.playerLayer?.player.duration ?? 0
+            currentTime = time
+            if total > 0 { duration = total }
+        }
     }
 
     private func controlButton(_ system: String, label: String, action: @escaping () -> Void) -> some View {

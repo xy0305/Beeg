@@ -201,15 +201,20 @@ struct VideoDetailView: View {
 
 struct TagFeedView: View {
     let tag: BeegTag
+    @ObservedObject private var session = BeegSession.shared
+    @State private var profile: BeegProfile?
+    @State private var following = false
     @State private var videos: [BeegVideo] = []
     @State private var offset = 0
     @State private var hasMore = true
     @State private var loading = false
     @State private var error: String?
+    @State private var showAccount = false
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 22) {
+                profileHeader
                 if let error, videos.isEmpty {
                     VStack(spacing: 12) {
                         Text(error).foregroundStyle(BeegTheme.muted)
@@ -236,7 +241,89 @@ struct TagFeedView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(BeegTheme.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .task { await load() }
+        .task {
+            await loadProfile()
+            await load()
+        }
+        .sheet(isPresented: $showAccount) { AccountView() }
+    }
+
+    private var profileHeader: some View {
+        VStack(spacing: 14) {
+            CircleAvatar(url: profile?.avatar ?? tag.avatar, size: 132)
+            Text(profile?.name ?? tag.displayName)
+                .font(.system(size: 32, weight: .bold))
+            if let profile {
+                Text("\(BeegCatalog.compactCount(profile.followers)) Followers · \(profile.videos) Videos")
+                    .foregroundStyle(BeegTheme.muted)
+                if !profile.caption.isEmpty {
+                    Text(profile.caption)
+                        .font(.system(size: 16))
+                        .foregroundStyle(BeegTheme.muted)
+                        .multilineTextAlignment(.center)
+                }
+                linkRow(profile.links)
+            }
+            Button {
+                Task { await toggleFollow() }
+            } label: {
+                Image(systemName: following ? "checkmark" : "plus")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(.black)
+                    .frame(width: 48, height: 48)
+                    .background(.white, in: Circle())
+            }
+            .accessibilityLabel(following ? "取消关注" : "关注")
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .foregroundStyle(.white)
+    }
+
+    private func linkRow(_ links: [BeegLink]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(links) { link in
+                    Link(destination: link.url) {
+                        HStack(spacing: 6) {
+                            RemoteImage(url: link.icon)
+                                .frame(width: 36, height: 36)
+                                .clipShape(Circle())
+                            if link.featured {
+                                Text(link.name)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .lineLimit(1)
+                                    .padding(.trailing, 8)
+                            }
+                        }
+                        .background(BeegTheme.chip, in: Capsule())
+                    }
+                    .accessibilityLabel(link.name)
+                }
+            }
+        }
+    }
+
+    private func loadProfile() async {
+        profile = try? await BeegClient().profile(slug: tag.slug)
+        guard session.isLoggedIn, let id = profile?.id else { return }
+        following = (try? await BeegClient().isFollowing(tagID: id)) ?? false
+    }
+
+    private func toggleFollow() async {
+        guard session.isLoggedIn else {
+            showAccount = true
+            return
+        }
+        guard let id = profile?.id else { return }
+        let next = !following
+        do {
+            try await BeegClient().setFollowing(next, tagID: id)
+            following = next
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     private func load() async {

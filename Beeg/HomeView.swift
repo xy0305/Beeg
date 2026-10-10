@@ -2,7 +2,9 @@ import SwiftUI
 
 struct HomeView: View {
     @StateObject private var model = HomeModel()
+    @ObservedObject private var session = BeegSession.shared
     @State private var showSearch = false
+    @State private var showAccount = false
 
     var body: some View {
         ScrollView {
@@ -21,6 +23,9 @@ struct HomeView: View {
         .sheet(isPresented: $showSearch) {
             SearchView()
         }
+        .sheet(isPresented: $showAccount) {
+            AccountView()
+        }
         .navigationDestination(for: BeegVideo.self) { video in
             VideoDetailView(video: video)
         }
@@ -37,7 +42,7 @@ struct HomeView: View {
             iconButton("sparkles", label: "AI") { showSearch = true }
             iconButton("video", label: "视频") {}
             iconButton("magnifyingglass", label: "搜索") { showSearch = true }
-            iconButton("person", label: "账号") {}
+            iconButton("person", label: "账号") { showAccount = true }
         }
         .padding(.horizontal, 16)
         .padding(.top, 4)
