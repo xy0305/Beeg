@@ -132,7 +132,7 @@ final class BeegClient {
     }
 
     private func videos(url: URL) async throws -> [BeegVideo] {
-        let rows = try decoder.decode([RawFact].self, from: try data(for: url))
+        let rows = try decoder.decode([RawFact].self, from: try await data(for: url))
         return rows.compactMap(BeegVideo.init)
     }
 

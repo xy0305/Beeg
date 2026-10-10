@@ -37,7 +37,7 @@ struct BeegPlayer: View {
         ])
         options.userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15"
         options.referer = "https://beeg.com/"
-        options.isAutoPlay = true
+        KSOptions.isAutoPlay = true
         return options
     }
 }
