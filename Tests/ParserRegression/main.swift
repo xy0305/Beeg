@@ -13,9 +13,14 @@ expect(BeegCatalog.compactCount(4_656) == "4.7K", "thousands")
 expect(BeegCatalog.compactCount(316) == "316", "small")
 expect(BeegCatalog.duration(782) == "13:02", "duration")
 
-let now = ISO8601DateFormatter().date(from: "2026-10-10T12:00:00Z")!
-expect(BeegCatalog.relativeDate("2026-10-09T18:10:57.561783Z", now: now) == "Today", "today")
-expect(BeegCatalog.relativeDate("2026-10-08T10:00:00Z", now: now) == "Yesterday", "yesterday")
+let calendar = Calendar(identifier: .gregorian)
+let now = calendar.date(from: DateComponents(year: 2026, month: 10, day: 10, hour: 15))!
+let today = calendar.date(byAdding: .hour, value: -4, to: now)!
+let yesterday = calendar.date(byAdding: .day, value: -1, to: now)!
+let formatter = ISO8601DateFormatter()
+formatter.formatOptions = [.withInternetDateTime]
+expect(BeegCatalog.relativeDate(formatter.string(from: today), now: now) == "Today", "today")
+expect(BeegCatalog.relativeDate(formatter.string(from: yesterday), now: now) == "Yesterday", "yesterday")
 
 let template = "key=abc,end=1,limit=10/data=ff/media=hls4A/_TPL_/777.mp4.m3u8"
 let master = BeegCatalog.masterPlaylist(template: template, fileID: 777)

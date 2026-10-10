@@ -149,7 +149,10 @@ final class BeegClient {
     }
 
     private func endpoint(_ path: String, _ query: [String: String] = [:]) -> URL {
-        var components = URLComponents(url: Self.store.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "store.externulls.com"
+        components.path = path.hasPrefix("/") ? path : "/\(path)"
         if !query.isEmpty {
             components.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
         }
