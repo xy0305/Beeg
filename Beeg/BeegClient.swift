@@ -93,6 +93,9 @@ final class BeegClient {
             "Accept": "application/json"
         ]
         configuration.timeoutIntervalForRequest = 25
+        configuration.httpCookieStorage = HTTPCookieStorage.shared
+        configuration.httpCookieAcceptPolicy = .always
+        configuration.httpShouldSetCookies = true
         self.session = session == .shared ? URLSession(configuration: configuration) : session
     }
 
@@ -145,8 +148,7 @@ final class BeegClient {
     }
 
     func login(email: String, password: String) async throws -> BeegAccount {
-        let account = try await authenticate(path: "login", email: email, password: password)
-        return account
+        try await authenticate(path: "login", email: email, password: password)
     }
 
     func signup(email: String, password: String) async throws {
@@ -160,30 +162,41 @@ final class BeegClient {
               !email.contains(" "), (8...128).contains(password.count) else {
             throw BeegAPIError.rejected("请输入有效邮箱和至少 8 位密码")
         }
-        guard let url = URL(string: "https://auth.beeg.com/\(path)/"), url.host == "auth.beeg.com" else {
-            throw BeegAPIError.invalidResponse
-        }
+        let captcha = try await BeegCaptcha.token(action: path == "signup" ? "signup" : "signin")
         let body = try JSONSerialization.data(withJSONObject: [
             "email": email,
             "password": password,
-            "scope": "beeg"
+            "scope": "beeg",
+            "captcha_token": captcha,
+            "action": path == "signup" ? "signup" : "signin"
         ])
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.httpBody = body
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("https://beeg.com/", forHTTPHeaderField: "Referer")
-        request.setValue("https://beeg.com", forHTTPHeaderField: "Origin")
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await authRequest(path: path, body: body)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw BeegAPIError.rejected(Self.message(from: data) ?? "登录失败")
         }
-        if path == "signup", data.isEmpty {
-            return BeegAccount(email: email, token: "")
-        }
         let token = (try? decoder.decode(LoginResponse.self, from: data).token) ?? ""
-        guard !token.isEmpty else { throw BeegAPIError.rejected("登录失败") }
+        guard !token.isEmpty else {
+            throw BeegAPIError.rejected(Self.message(from: data) ?? "登录未完成，请完成验证后重试")
+        }
         return BeegAccount(email: email, token: token)
+    }
+
+    private func authRequest(path: String, method: String = "POST", body: Data? = nil) async throws -> (Data, URLResponse) {
+        guard ["login", "signup", "account", "logout"].contains(path),
+              let url = URL(string: "https://auth.beeg.com/\(path)/"),
+              url.host == "auth.beeg.com" else {
+            throw BeegAPIError.invalidResponse
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.httpBody = body
+        if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        request.setValue("https://beeg.com/", forHTTPHeaderField: "Referer")
+        request.setValue("https://beeg.com", forHTTPHeaderField: "Origin")
+        if let token = BeegSession.shared.token, !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        return try await session.data(for: request)
     }
 
     func logout() async {
