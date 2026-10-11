@@ -15,6 +15,7 @@ struct BeegPlayer: View {
     @StateObject private var coordinator = KSVideoPlayer.Coordinator()
 
     init(playlistURL: URL, qualities: [BeegQuality]) {
+        self.playlistURL = playlistURL
         self.qualities = qualities
         _selectedID = State(initialValue: qualities.first?.id ?? "")
     }
