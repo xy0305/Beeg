@@ -37,7 +37,8 @@ struct BeegQuality: Identifiable, Hashable {
     let url: URL
 }
 
-struct BeegPlayback {
+struct BeegPlayback: Equatable {
+    let playlistURL: URL
     let qualities: [BeegQuality]
 }
 
@@ -260,14 +261,10 @@ final class BeegClient {
         guard let playlist = String(data: playlistData, encoding: .utf8) else {
             throw BeegAPIError.invalidResponse
         }
-        let qualities = BeegCatalog.variants(playlist).compactMap { item -> BeegQuality? in
-            guard let url = URL(string: "https://video.beeg.com\(item.path)") else { return nil }
-            return BeegQuality(id: item.label, label: item.label, url: url)
+        let qualities = BeegCatalog.variants(playlist).map { item in
+            BeegQuality(id: item.label, label: item.label, url: master)
         }
-        if qualities.isEmpty {
-            return BeegPlayback(qualities: [BeegQuality(id: "auto", label: "Auto", url: master)])
-        }
-        return BeegPlayback(qualities: qualities)
+        return BeegPlayback(playlistURL: master, qualities: qualities)
     }
 
     static func avatarURL(photoID: Int?, cropID: Int?) -> URL? {

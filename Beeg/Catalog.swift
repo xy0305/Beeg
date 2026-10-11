@@ -72,6 +72,30 @@ enum BeegCatalog {
         return urlError?.code == .cancelled
     }
 
+    static func playbackPlaylist(_ playlist: String, quality: String?) -> String? {
+        let selected = variants(playlist).first { quality == nil || $0.label == quality } ?? variants(playlist).first
+        guard let selected else { return nil }
+        let rows = playlist.components(separatedBy: .newlines)
+        var output: [String] = []
+        var index = 0
+        while index < rows.count {
+            let row = rows[index]
+            guard row.contains("#EXT-X-STREAM-INF"), index + 1 < rows.count else {
+                output.append(row)
+                index += 1
+                continue
+            }
+            let path = rows[index + 1].trimmingCharacters(in: .whitespaces)
+            if path == selected.path {
+                output.append(row)
+                output.append(path)
+            }
+            index += 2
+        }
+        let text = output.joined(separator: "\n")
+        return text.contains("#EXT-X-STREAM-INF") ? text : nil
+    }
+
     static func preferredVariant(_ playlist: String) -> String? {
         variants(playlist).first?.path
     }

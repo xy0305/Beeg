@@ -177,7 +177,7 @@ struct VideoDetailView: View {
     @ViewBuilder
     private var player: some View {
         if let playback {
-            BeegPlayer(qualities: playback.qualities)
+            BeegPlayer(playlistURL: playback.playlistURL, qualities: playback.qualities)
         } else if loading {
             ZStack {
                 RemoteImage(url: BeegClient.frameURL(fileID: video.id, second: video.thumbs.first ?? 0, width: 1280))

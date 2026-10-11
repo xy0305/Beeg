@@ -4,6 +4,7 @@ import AVFoundation
 import KSPlayer
 
 struct BeegPlayer: View {
+    let playlistURL: URL
     let qualities: [BeegQuality]
     @State private var selectedID: String
     @State private var fullscreen = false
@@ -13,7 +14,7 @@ struct BeegPlayer: View {
     @State private var seeking = false
     @StateObject private var coordinator = KSVideoPlayer.Coordinator()
 
-    init(qualities: [BeegQuality]) {
+    init(playlistURL: URL, qualities: [BeegQuality]) {
         self.qualities = qualities
         _selectedID = State(initialValue: qualities.first?.id ?? "")
     }
@@ -175,7 +176,7 @@ struct BeegPlayer: View {
     private func switchQuality(_ quality: BeegQuality) {
         let time = coordinator.playerLayer?.player.currentPlaybackTime ?? currentTime
         selectedID = quality.id
-        coordinator.playerLayer?.set(url: quality.url, options: playbackOptions)
+        coordinator.playerLayer?.set(url: playlistURL, options: playbackOptions)
         guard time > 1 else { return }
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 350_000_000)
