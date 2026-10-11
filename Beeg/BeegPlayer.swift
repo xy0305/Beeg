@@ -37,7 +37,7 @@ struct BeegPlayer: View {
         ZStack {
             Color.black
             if let quality = selected {
-                KSVideoPlayer(coordinator: coordinator, url: quality.url, options: playbackOptions)
+                KSVideoPlayer(coordinator: coordinator, url: playlistURL, options: playbackOptions)
             }
             controls(fullscreen: fullscreen)
             if fullscreen {
